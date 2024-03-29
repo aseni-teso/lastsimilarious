@@ -2,20 +2,29 @@ import os
 import argparse
 import requests
 import subprocess
+import configparser
+import time
+import hashlib
+import pylast
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from urllib.parse import quote_plus
+from urllib.parse import urlencode
 
 load_dotenv()
 api_key = os.getenv("LASTFM_API_KEY")
+api_secret = os.getenv("LASTFM_API_SECRET")
+username = os.getenv("username")
+password = os.getenv("password")
 
 parser = argparse.ArgumentParser(description='Last.fm audio player')
 parser.add_argument('-n', '--track', metavar='TRACK', help='Search by track')
 parser.add_argument('-b', '--album', metavar='ALBUM', help='Search by album')
 parser.add_argument('-a', '--artist', metavar='ARTIST', help='Search by artist')
 parser.add_argument('-g', '--tag', metavar='TAG', help='Search by tag')
+parser.add_argument('-u', '--user', metavar='USER', help='Search by user')
 args = parser.parse_args()
+
 
 def search_track(query):
     url = "http://ws.audioscrobbler.com/2.0/?method=track.search"
@@ -62,14 +71,38 @@ def search_tag(query):
     tag = response['results']['tagmatches']['tag'][0]
     return tag
 
+def scrobble_track(artist, track, session_key):
+    network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
+    try:
+        network.scrobble(artist=artist, title=track, timestamp=int(time.time()))
+    except pylast.WSError as e:
+        print(f"Ошибка: {e}")
+        return None
+    return "Success"
+
 def play_track(track):
     track_url = get_track_url(track)
-    subprocess.run(['mpv', '--no-video', track_url])
+    print(track)
+    if isinstance(track.get('artist'), dict):
+        artist_name = track['artist'].get('name', '')
+    else:
+        artist_name = track.get('artist', '')
+    print("Artist: ", artist_name)
+    print("Track: ", track['name'])
+    subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
+    session_key = get_or_generate_session_key()
+    scrobble_track(artist_name, track['name'], session_key)
+    similar_track = search_similar_track(track)
+    play_track(similar_track)
 
 def get_track_url(track):
-    print(track)
     track_name = track.get('name', '')
-    artist_name = track.get('artist', {}).get('name', '')
+
+    if isinstance(track.get('artist'), dict):
+        artist_name = track['artist'].get('name', '')
+    else:
+        artist_name = track.get('artist', '')
+
     search_query = f'{track_name} {artist_name}'
     search_query = '+'.join(search_query.split())
     search_url = f'https://inv.oikei.net/search?q={search_query}'
@@ -86,7 +119,16 @@ def get_track_url(track):
 def play_album(album):
     track_list = get_album_tracks(album)
     for track in track_list:
-        play_track(track)
+        track_url = get_track_url(track)
+        if isinstance(track.get('artist'), dict):
+            artist_name = track['artist'].get('name', '')
+        else:
+            artist_name = track.get('artist', '')
+        print("Artist: ", artist_name)
+        print("Track: ", track['name'])
+        subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
+        session_key = get_or_generate_session_key()
+        scrobble_track(artist_name, track['name'], session_key)
 
 def get_album_tracks(album):
     album_search_url = "http://ws.audioscrobbler.com/2.0/?method=album.search"
@@ -117,7 +159,16 @@ def get_album_tracks(album):
 def play_artist_tracks(artist):
     track_list = get_artist_tracks(artist)
     for track in track_list:
-        play_track(track)
+        track_url = get_track_url(track)
+        if isinstance(track.get('artist'), dict):
+            artist_name = track['artist'].get('name', '')
+        else:
+            artist_name = track.get('artist', '')
+        print("Artist: ", artist_name)
+        print("Track: ", track['name'])
+        subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
+        session_key = get_or_generate_session_key()
+        scrobble_track(artist_name, track['name'], session_key)
 
 def play_artist_albums(artist):
     album_list = get_artist_albums(artist)
@@ -128,7 +179,7 @@ def get_artist_tracks(artist):
     url = "http://ws.audioscrobbler.com/2.0/?method=artist.gettoptracks"
     params = {
             "api_key": api_key,
-            "album": artist['name'],
+            "artist": artist['name'],
             "format": "json"
             }
     response = requests.get(url, params=params).json()
@@ -139,7 +190,7 @@ def get_artist_albums(artist):
     url = "http://ws.audioscrobbler.com/2.0/?method=artist.gettopalbums"
     params = {
             "api_key": api_key,
-            "album": artist['name'],
+            "artist": artist['name'],
             "format": "json"
             }
     response = requests.get(url, params=params).json()
@@ -147,64 +198,136 @@ def get_artist_albums(artist):
     return album_list
 
 def play_tag(tag):
-    artist_list = get_popular_artists_by_tag(tag)
-    print("Popular artists by tag '{}':".format(tag))
-    for i, artist in enumerate(artist_list):
-        print("{}. {}".format(i+1, artist["name"]))
+    track_list = get_popular_tracks_by_tag(tag)
+    for track in track_list:
+        track_url = get_track_url(track)
+        if isinstance(track.get('artist'), dict):
+            artist_name = track['artist'].get('name', '')
+        else:
+            artist_name = track.get('artist', '')
+        print("Artist: ", artist_name)
+        print("Track: ", track['name'])
+        subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
+        session_key = get_or_generate_session_key()
+        scrobble_track(artist_name, track['name'], session_key)
 
-    selection = int(input("Input artist number: "))
-    selected_artist = artist_list[selection-1]
+def play_user(user):
+    track_list = get_popular_tracks_by_user(user)
+    for track in track_list:
+        track_url = get_track_url(track)
+        if isinstance(track.get('artist'), dict):
+            artist_name = track['artist'].get('name', '')
+        else:
+            artist_name = track.get('artist', '')
+        print("Artist: ", artist_name)
+        print("Track: ", track['name'])
+        subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
+        session_key = get_or_generate_session_key()
+        scrobble_track(artist_name, track['name'], session_key)
 
-    play_artist_tracks(selected_artist)
-
-def get_popular_artists_by_tag(tag):
-    url = "http://ws.audioscrobbler.com/2.0/?method=tag.gettopartists"
+def get_popular_tracks_by_tag(tag):
+    url = "http://ws.audioscrobbler.com/2.0/?method=tag.gettoptracks"
     params = {
             "api_key": api_key,
             "tag": tag,
             "format": "json"
             }
     response = requests.get(url, params=params).json()
-    artist_list = response['topartists']['artist'][0]
-    return artist_list
+    track_list = response['tracks']['track']
+    return track_list
 
+def get_popular_tracks_by_user(user):
+    url = "http://ws.audioscrobbler.com/2.0/?method=user.gettoptracks"
+    params = {
+            "api_key": api_key,
+            "user": user,
+            "format": "json"
+            }
+    response = requests.get(url, params=params).json()
+    track_list = response['toptracks']['track']
+    return track_list
 
 def search_similar_track(track):
     url = "http://ws.audioscrobbler.com/2.0/?method=track.getsimilar"
-    params = {
+    if isinstance(track.get('artist'), dict):
+        params = {
+            "api_key": api_key,
+            "artist": track['artist']['name'],
+            "track": track['name'],
+            "limit": 5,
+            "format": "json"
+            }
+    else:
+        params = {
             "api_key": api_key,
             "artist": track['artist'],
             "track": track['name'],
+            "limit": 5,
             "format": "json"
             }
     response = requests.get(url, params=params).json()
     similar_track = response['similartracks']['track'][0]
     return similar_track
 
-def search_similar_album(album):
-    url = "http://ws.audioscrobbler.com/2.0/?method=album.getsimilar"
+def get_request_token(api_key, api_secret):
+    url = "http://ws.audioscrobbler.com/2.0/?method=auth.getToken"
+    api_sig = hashlib.md5((f"api_key{api_key}methodauth.getToken{api_secret}").encode()).hexdigest()
     params = {
             "api_key": api_key,
-            "artist": album['artist'],
-            "track": album['name'],
+            "api_sig": api_sig,
             "format": "json"
             }
-    response = requests.get(url, params=params).json()
-    similar_album = response['similars']['album'][0]
-    return similar_album
+    response = requests.post(url, data=params).json()
+    print("response: ", response)
+    token = response["token"]
+    return token
+
+def get_session_key(api_key, api_secret, token):
+    url = "http://ws.audioscrobbler.com/2.0/?method=auth.getSession"
+    api_sig = hashlib.md5((f"api_key{api_key}methodauth.getSessiontoken{token}{api_secret}").encode()).hexdigest()
+    params = {
+            "api_key": api_key,
+            "api_sig": api_sig,
+            "token": token,
+            "format": "json"
+            }
+    print(api_key, api_sig, token)
+    response = requests.post(url, data=params).json()
+    session_key = response['session']['key']
+    return session_key
+
+def get_or_generate_session_key():
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    if config.has_option('AUTH', 'SESSION_KEY'):
+        session_key = config.get('AUTH', 'SESSION_KEY')
+        return session_key
+    else:
+        token = get_request_token(api_key, api_secret)
+        auth_url = f"http://www.last.fm/api/auth?api_key={api_key}&token={token}"
+        print(f"Please grant permission at: {auth_url}")
+        input("Press Enter after granting permission...")
+        session_key = get_session_key(api_key, api_secret, token)
+        save_session_key(session_key)
+        return session_key
+
+def save_session_key(session_key):
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    if not config.has_section('AUTH'):
+        config.add_section('AUTH')
+    config.set('AUTH', 'SESSION_KEY', session_key)
+    with open('config.ini', 'w') as configfile:
+        config.write(configfile)
 
 def main():
     if args.track:
         track = search_track(args.track)
         play_track(track)
-        similar_track = search_similar_track(track)
-        play_track(similar_track)
 
     elif args.album:
         album = search_album(args.album)
         play_album(album)
-        similar_album = search_similar_album(album)
-        play_album(similar_album)
 
     elif args.artist:
         artist = search_artist(args.artist)
@@ -217,6 +340,10 @@ def main():
     elif args.tag:
         tag = args.tag        
         play_tag(tag)
+
+    elif args.user:
+        user = args.user
+        play_user(user)
 
 if __name__ == "__main__":
     main()
