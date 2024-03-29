@@ -9,7 +9,6 @@ import pylast
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from urllib.parse import urlencode
 
 load_dotenv()
 api_key = os.getenv("LASTFM_API_KEY")
@@ -25,6 +24,7 @@ parser.add_argument('-g', '--tag', metavar='TAG', help='Search by tag')
 parser.add_argument('-u', '--user', metavar='USER', help='Search by user')
 args = parser.parse_args()
 
+played_tracks = {}
 
 def search_track(query):
     url = "http://ws.audioscrobbler.com/2.0/?method=track.search"
@@ -71,6 +71,13 @@ def search_tag(query):
     tag = response['results']['tagmatches']['tag'][0]
     return tag
 
+def add_to_played_tracks(artist, track):
+    key = f"{artist} - {track}"
+    if key in played_tracks:
+        played_tracks[key] += 1
+    else:
+        played_tracks[key] = 1
+
 def scrobble_track(artist, track, session_key):
     network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
     try:
@@ -82,7 +89,6 @@ def scrobble_track(artist, track, session_key):
 
 def play_track(track):
     track_url = get_track_url(track)
-    print(track)
     if isinstance(track.get('artist'), dict):
         artist_name = track['artist'].get('name', '')
     else:
@@ -90,6 +96,7 @@ def play_track(track):
     print("Artist: ", artist_name)
     print("Track: ", track['name'])
     subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
+    add_to_played_tracks(artist_name, track['name'])
     session_key = get_or_generate_session_key()
     scrobble_track(artist_name, track['name'], session_key)
     similar_track = search_similar_track(track)
@@ -254,7 +261,7 @@ def search_similar_track(track):
             "api_key": api_key,
             "artist": track['artist']['name'],
             "track": track['name'],
-            "limit": 5,
+            "limit": 12,
             "format": "json"
             }
     else:
@@ -262,12 +269,16 @@ def search_similar_track(track):
             "api_key": api_key,
             "artist": track['artist'],
             "track": track['name'],
-            "limit": 5,
+            "limit": 12,
             "format": "json"
             }
     response = requests.get(url, params=params).json()
-    similar_track = response['similartracks']['track'][0]
-    return similar_track
+    similar_tracks = response['similartracks']['track']
+
+    for similar_track in similar_tracks:
+        key = f"{similar_track['artist']['name']} - {similar_track['name']}"
+        if key not in played_tracks:
+            return similar_track
 
 def get_request_token(api_key, api_secret):
     url = "http://ws.audioscrobbler.com/2.0/?method=auth.getToken"
