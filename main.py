@@ -45,8 +45,10 @@ def search_track(query):
             "track": query,
             "format": "json"
             }
+    print("\nSearching track... ")
     response = requests.get(url, params=params).json()
     track = response['results']['trackmatches']['track'][0]
+    print("OK")
     return track
 
 def search_album(query):
@@ -56,9 +58,10 @@ def search_album(query):
             "album": query,
             "format": "json"
             }
+    print("\nSearching album... ")
     response = requests.get(url, params=params).json()
     album = response['results']['albummatches']['album'][0]
-    print(album)
+    print("OK")
     return album
 
 def search_artist(query):
@@ -68,8 +71,10 @@ def search_artist(query):
             "artist": query,
             "format": "json"
             }
+    print("\nSearching artist... ")
     response = requests.get(url, params=params).json()
     artist = response['results']['artistmatches']['artist'][0]
+    print("OK")
     return artist
 
 def search_tag(query):
@@ -79,8 +84,10 @@ def search_tag(query):
             "tag": query,
             "format": "json"
             }
+    print("\nSearching tag... ")
     response = requests.get(url, params=params).json()
     tag = response['results']['tagmatches']['tag'][0]
+    print("OK")
     return tag
 
 def add_to_played_tracks(artist, track, scrobbled):
@@ -185,8 +192,9 @@ def play_track(track):
             if player.duration and player.duration != 'None':
                 if player.time_pos >= float(player.duration) * 0.5 or time.time() - start_time >= 180:
                     if not scrobbled:
+                        print("\nScrobbling... ")
                         scrobble_track(artist_name, track['name'], session_key)
-                        print("\nScrobbled")
+                        print("OK")
                         scrobbled = True
 
 
@@ -237,14 +245,19 @@ def get_track_url(track):
     search_query = '+'.join(search_query.split())
     for mirror_url in INVIDIOUS_MIRRORS_URLS:
         search_url = f'{mirror_url}/search?q={search_query}'
+        print("\nSearching url... ")
         response = requests.get(search_url)
+        print("OK")
 
         soup = BeautifulSoup(response.text, 'html.parser')
         video_link = soup.find('a', href=lambda href: href.startswith('/watch?v='))
         while video_link:
             video_url = f'https://www.youtube.com{video_link["href"]}'
+            print("\nChecking url... ")
             if is_video_available(video_url):
+                print("OK")
                 return video_url
+            print("Crashed. Trying now... ")
             video_link = video_link.find_next('a', href=lambda href: href.startswith('/watch?v='))
     return None
 
@@ -399,10 +412,12 @@ def search_similar_track(track):
             "limit": 12,
             "format": "json"
             }
+    print("\nSearching next track... ")
     response = requests.get(url, params=params).json()
     similar_tracks = response['similartracks']['track']
 
     if not similar_tracks:
+        print("Crash.\nSearching similar artist... ")
         artist_params = {
                 "api_key": api_key,
                 "artist": params['artist'],
@@ -425,9 +440,11 @@ def search_similar_track(track):
             for top_track in top_tracks:
                 key = f"{top_track['artist']['name']} - {top_track['name']}"
                 if key not in played_tracks:
+                    print("OK")
                     return top_track
 
         if not similar_artists:
+            print("Crash.\nSearching random love track... ")
             url = "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks"
             user = username
             params = {
@@ -442,12 +459,14 @@ def search_similar_track(track):
             response = requests.get(url, params=params).json()
             track_list = response['lovedtracks']['track']
             random_track = random.choice(track_list)
+            print("OK")
             return random_track
 
 
     for similar_track in similar_tracks:
         key = f"{similar_track['artist']['name']} - {similar_track['name']}"
         if key not in played_tracks:
+            print("OK")
             return similar_track
 
 def get_request_token(api_key, api_secret):
@@ -459,7 +478,6 @@ def get_request_token(api_key, api_secret):
             "format": "json"
             }
     response = requests.post(url, data=params).json()
-    print("response: ", response)
     token = response["token"]
     return token
 
@@ -472,7 +490,6 @@ def get_session_key(api_key, api_secret, token):
             "token": token,
             "format": "json"
             }
-    print(api_key, api_sig, token)
     response = requests.post(url, data=params).json()
     session_key = response['session']['key']
     return session_key
