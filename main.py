@@ -8,6 +8,7 @@ import hashlib
 import pylast
 import mpv
 import json
+import random
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -120,6 +121,25 @@ def scrobble_track(artist, track, session_key):
         return None
     return "Success"
 
+def update_now_playing(artist, track, session_key):
+    network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
+    try:
+        network.update_now_playing(artist=artist, title=track) 
+    except pylast.WSError as e:
+        print(f"Ошибка: {e}")
+        return None
+    return "Success"
+
+def add_to_loved_tracks(artist, track, session_key):
+    network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
+    try:
+        track_object = network.get_track(artist=artist, title=track) 
+        track_object.love()
+    except pylast.WSError as e:
+        print(f"Ошибка: {e}")
+        return None
+    return "Success"
+
 def play_track(track):
     while True:
         track_url = get_track_url(track)
@@ -135,27 +155,42 @@ def play_track(track):
         def my_q_binding():
             nonlocal track_finished
             track_finished = True
-            print("Track aborted. Next...")
+            print("\nTrack aborted. Next...")
+
+        @player.on_key_press('Shift+q')
+        def my_shift_q_binding():
+            player.terminate()
+            print("\nExiting...")
+
+        @player.on_key_press('l')
+        def my_l_binding():
+            response = input("\nAdd track to loved tracks? (y/n): ")
+            if response.lower() == "y":
+                add_to_loved_tracks(artist_name, track['name'], session_key)
+                print("\nTrack added to loved tracks.")
+            else:
+                print("\nCanceled.")
 
         player.play(track_url)
         playing = True
         start_time = time.time()
         scrobbled = False
         track_finished = False
+        session_key = get_or_generate_session_key()
 
         while playing:
+            update_now_playing(artist_name, track['name'], session_key)
             if track_finished:
                 break
             if player.duration and player.duration != 'None':
                 if player.time_pos >= float(player.duration) * 0.5 or time.time() - start_time >= 180:
                     if not scrobbled:
-                        session_key = get_or_generate_session_key()
                         scrobble_track(artist_name, track['name'], session_key)
-                        print("Scrobbled")
+                        print("\nScrobbled")
                         scrobbled = True
 
 
-                if player.time_pos >= float(player.duration) - 5:
+                if player.time_pos >= float(player.duration) - 3:
                     if not track_finished:
                         track_finished = True
             
@@ -181,6 +216,16 @@ def play_track(track):
 
         player.terminate()
 
+def is_video_available(url):
+    try:
+        output = subprocess.check_output(['yt-dlp', '--ignore-errors', '--skip-download', url], stderr=subprocess.DEVNULL)
+        output = output.decode('utf-8')
+        if 'Video unavailable' in output:
+            return False
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
 def get_track_url(track):
     track_name = track.get('name', '')
     if isinstance(track.get('artist'), dict):
@@ -198,8 +243,7 @@ def get_track_url(track):
         video_link = soup.find('a', href=lambda href: href.startswith('/watch?v='))
         while video_link:
             video_url = f'https://www.youtube.com{video_link["href"]}'
-            response = requests.get(video_url)
-            if response.status_code == 200:
+            if is_video_available(video_url):
                 return video_url
             video_link = video_link.find_next('a', href=lambda href: href.startswith('/watch?v='))
     return None
@@ -372,7 +416,7 @@ def search_similar_track(track):
             top_tracks_params = {
                 "api_key": api_key,
                 "artist": artist['name'],
-                "limit": 10,
+                "limit": 6,
                 "format": "json"
                 }
             top_tracks_response = requests.get("http://ws.audioscrobbler.com/2.0/?method=artist.gettoptracks", params=top_tracks_params).json()
@@ -382,6 +426,24 @@ def search_similar_track(track):
                 key = f"{top_track['artist']['name']} - {top_track['name']}"
                 if key not in played_tracks:
                     return top_track
+
+        if not similar_artists:
+            url = "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks"
+            user = username
+            params = {
+                    "api_key": api_key,
+                    "user": user,
+                    "format": "json"
+                    }
+            response = requests.get(url, params=params).json()
+            total_pages = int(response['lovedtracks']['@attr']['totalPages'])
+            random_page = random.randint(1, total_pages)
+            params["page"] = random_page
+            response = requests.get(url, params=params).json()
+            track_list = response['lovedtracks']['track']
+            random_track = random.choice(track_list)
+            return random_track
+
 
     for similar_track in similar_tracks:
         key = f"{similar_track['artist']['name']} - {similar_track['name']}"
