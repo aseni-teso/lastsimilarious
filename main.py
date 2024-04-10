@@ -31,12 +31,17 @@ args = parser.parse_args()
 played_tracks = OrderedDict()
 
 INVIDIOUS_MIRRORS_URLS = [
+        'https://invidious.privacyredirect.com',
         'https://inv.oikei.net',
         'https://inv.us.projectsegfau.lt',
         'https://yewtu.be',
-        'https://invidious.privacyredirect.com',
         'https://inv.us.projectsegfau.lt'
         ]
+
+def get_network():
+    session_key = get_or_generate_session_key()
+    network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
+    return network
 
 def search_track(query):
     url = "http://ws.audioscrobbler.com/2.0/?method=track.search"
@@ -119,8 +124,8 @@ def get_previous_track():
     else:
         return None
 
-def scrobble_track(artist, track, session_key):
-    network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
+def scrobble_track(artist, track):
+    network = get_network()
     try:
         network.scrobble(artist=artist, title=track, timestamp=int(time.time()))
     except pylast.WSError as e:
@@ -128,8 +133,8 @@ def scrobble_track(artist, track, session_key):
         return None
     return "Success"
 
-def update_now_playing(artist, track, session_key):
-    network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
+def update_now_playing(artist, track):
+    network = get_network()
     try:
         network.update_now_playing(artist=artist, title=track) 
     except pylast.WSError as e:
@@ -137,8 +142,8 @@ def update_now_playing(artist, track, session_key):
         return None
     return "Success"
 
-def add_to_loved_tracks(artist, track, session_key):
-    network = pylast.LastFMNetwork(api_key=api_key, api_secret=api_secret, session_key=session_key)
+def add_to_loved_tracks(artist, track):
+    network = get_network()
     try:
         track_object = network.get_track(artist=artist, title=track) 
         track_object.love()
@@ -147,9 +152,26 @@ def add_to_loved_tracks(artist, track, session_key):
         return None
     return "Success"
 
+def users_track_info(artist, track):
+    network = get_network()
+    track = pylast.Track(artist=artist, title=track, network=network, username=username)
+
+    loved = track.get_userloved()
+    assert loved is not None
+    assert isinstance(loved, bool)
+    assert not isinstance(loved, str)
+
+    count = track.get_userplaycount()
+
+    print(f"You listen this track {count} times.")
+    if loved:
+        print("You LOVE this track.")
+        return
+    return
+
 def play_track(track):
+    track_url = get_track_url(track)
     while True:
-        track_url = get_track_url(track)
         if isinstance(track.get('artist'), dict):
             artist_name = track['artist'].get('name', '')
         else:
@@ -166,37 +188,48 @@ def play_track(track):
 
         @player.on_key_press('Shift+q')
         def my_shift_q_binding():
-            player.terminate()
+            player.command('stop')
+            player.command('quit')
             print("\nExiting...")
+            time.sleep(0.1)
+            os._exit(0)
 
         @player.on_key_press('l')
         def my_l_binding():
             response = input("\nAdd track to loved tracks? (y/n): ")
             if response.lower() == "y":
-                add_to_loved_tracks(artist_name, track['name'], session_key)
+                add_to_loved_tracks(artist_name, track['name'])
                 print("\nTrack added to loved tracks.")
             else:
                 print("\nCanceled.")
 
         player.play(track_url)
         playing = True
-        start_time = time.time()
         scrobbled = False
         track_finished = False
-        session_key = get_or_generate_session_key()
+        users_track_info(artist_name, track['name'])
+
+        add_to_played_tracks(artist_name, track['name'], scrobbled)
+        print(played_tracks)
+        if not scrobbled:
+            previous_track = get_previous_track()
+            similar_track = search_similar_track(previous_track)
+        else:
+            similar_track = search_similar_track(track)
+        if similar_track:
+            track_url = get_track_url(similar_track)
 
         while playing:
-            update_now_playing(artist_name, track['name'], session_key)
+            update_now_playing(artist_name, track['name'])
             if track_finished:
                 break
             if player.duration and player.duration != 'None':
-                if player.time_pos >= float(player.duration) * 0.5 or time.time() - start_time >= 180:
+                if player.time_pos >= float(player.duration) * 0.5 or player.time_pos >= 180:
                     if not scrobbled:
                         print("\nScrobbling... ")
-                        scrobble_track(artist_name, track['name'], session_key)
+                        scrobble_track(artist_name, track['name'])
                         print("OK")
                         scrobbled = True
-
 
                 if player.time_pos >= float(player.duration) - 3:
                     if not track_finished:
@@ -210,15 +243,7 @@ def play_track(track):
             time.sleep(1)
 
         if track_finished:
-            add_to_played_tracks(artist_name, track['name'], scrobbled)
-            print(played_tracks)
-            if not scrobbled:
-                track = get_previous_track()
-            similar_track = search_similar_track(track)
-            if similar_track:
-                track = similar_track
-            else:
-                break
+            track = similar_track
         else:
             break
 
@@ -257,7 +282,7 @@ def get_track_url(track):
             if is_video_available(video_url):
                 print("OK")
                 return video_url
-            print("Crashed. Trying now... ")
+            print("Failed. Trying now... ")
             video_link = video_link.find_next('a', href=lambda href: href.startswith('/watch?v='))
     return None
 
@@ -273,7 +298,7 @@ def play_album(album):
         print("Track: ", track['name'])
         subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
         session_key = get_or_generate_session_key()
-        scrobble_track(artist_name, track['name'], session_key)
+        scrobble_track(artist_name, track['name'])
 
 def get_album_tracks(album):
     album_search_url = "http://ws.audioscrobbler.com/2.0/?method=album.search"
@@ -313,7 +338,7 @@ def play_artist_tracks(artist):
         print("Track: ", track['name'])
         subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
         session_key = get_or_generate_session_key()
-        scrobble_track(artist_name, track['name'], session_key)
+        scrobble_track(artist_name, track['name'])
 
 def play_artist_albums(artist):
     album_list = get_artist_albums(artist)
@@ -354,7 +379,7 @@ def play_tag(tag):
         print("Track: ", track['name'])
         subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
         session_key = get_or_generate_session_key()
-        scrobble_track(artist_name, track['name'], session_key)
+        scrobble_track(artist_name, track['name'])
 
 def play_user(user):
     track_list = get_popular_tracks_by_user(user)
@@ -368,7 +393,7 @@ def play_user(user):
         print("Track: ", track['name'])
         subprocess.run(['mpv', '--no-video', '--no-sub', track_url])
         session_key = get_or_generate_session_key()
-        scrobble_track(artist_name, track['name'], session_key)
+        scrobble_track(artist_name, track['name'])
 
 def get_popular_tracks_by_tag(tag):
     url = "http://ws.audioscrobbler.com/2.0/?method=tag.gettoptracks"
@@ -417,7 +442,7 @@ def search_similar_track(track):
     similar_tracks = response['similartracks']['track']
 
     if not similar_tracks:
-        print("Crash.\nSearching similar artist... ")
+        print("Fail.\nSearching similar artist... ")
         artist_params = {
                 "api_key": api_key,
                 "artist": params['artist'],
@@ -444,30 +469,33 @@ def search_similar_track(track):
                     return top_track
 
         if not similar_artists:
-            print("Crash.\nSearching random love track... ")
-            url = "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks"
-            user = username
-            params = {
-                    "api_key": api_key,
-                    "user": user,
-                    "format": "json"
-                    }
-            response = requests.get(url, params=params).json()
-            total_pages = int(response['lovedtracks']['@attr']['totalPages'])
-            random_page = random.randint(1, total_pages)
-            params["page"] = random_page
-            response = requests.get(url, params=params).json()
-            track_list = response['lovedtracks']['track']
-            random_track = random.choice(track_list)
-            print("OK")
+            random_track = get_random_loved_track()
             return random_track
-
 
     for similar_track in similar_tracks:
         key = f"{similar_track['artist']['name']} - {similar_track['name']}"
         if key not in played_tracks:
             print("OK")
             return similar_track
+
+def get_random_loved_track():
+    print("Searching random loved track... ")
+    url = "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks"
+    user = username
+    params = {
+            "api_key": api_key,
+            "user": user,
+            "format": "json"
+            }
+    response = requests.get(url, params=params).json()
+    total_pages = int(response['lovedtracks']['@attr']['totalPages'])
+    random_page = random.randint(1, total_pages)
+    params["page"] = random_page
+    response = requests.get(url, params=params).json()
+    track_list = response['lovedtracks']['track']
+    random_track = random.choice(track_list)
+    print("OK")
+    return random_track
 
 def get_request_token(api_key, api_secret):
     url = "http://ws.audioscrobbler.com/2.0/?method=auth.getToken"
@@ -519,29 +547,36 @@ def save_session_key(session_key):
         config.write(configfile)
 
 def main():
-    if args.track:
-        track = search_track(args.track)
-        play_track(track)
+    try:
+        if args.track:
+            track = search_track(args.track)
+            play_track(track)
 
-    elif args.album:
-        album = search_album(args.album)
-        play_album(album)
+        elif args.album:
+            album = search_album(args.album)
+            play_album(album)
 
-    elif args.artist:
-        artist = search_artist(args.artist)
-        display_choice = input("Play artist's tracks (1) or albums (2). Input 1 or 2: ")
-        if display_choice == "1":
-            play_artist_tracks(artist)
-        elif display_choice == "2":
-            play_artist_albums(artist)
+        elif args.artist:
+            artist = search_artist(args.artist)
+            display_choice = input("Play artist's tracks (1) or albums (2). Input 1 or 2: ")
+            if display_choice == "1":
+                play_artist_tracks(artist)
+            elif display_choice == "2":
+                play_artist_albums(artist)
 
-    elif args.tag:
-        tag = args.tag        
-        play_tag(tag)
+        elif args.tag:
+            tag = args.tag        
+            play_tag(tag)
 
-    elif args.user:
-        user = args.user
-        play_user(user)
+        elif args.user:
+            user = args.user
+            play_user(user)
+
+        else:
+            track = get_random_loved_track()
+            play_track(track)
+    except pylast.NetworkError as e:
+        print("Network error:", str(e))
 
 if __name__ == "__main__":
     main()
