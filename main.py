@@ -496,6 +496,8 @@ def get_random_loved_track():
             }
     response = requests.get(url, params=params).json()
     total_pages = int(response['lovedtracks']['@attr']['totalPages'])
+    if total_pages == 0:
+        raise ValueError("You have no tracks in your lovedtracks.")
     random_page = random.randint(1, total_pages)
     params["page"] = random_page
     response = requests.get(url, params=params).json()
