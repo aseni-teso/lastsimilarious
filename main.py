@@ -29,6 +29,7 @@ parser.add_argument('-u', '--user', metavar='USER', help='Search by user')
 args = parser.parse_args()
 
 played_tracks = OrderedDict()
+aborted_artists = OrderedDict()
 
 INVIDIOUS_MIRRORS_URLS = [
         'https://invidious.privacyredirect.com',
@@ -102,7 +103,9 @@ def add_to_played_tracks(artist, track, scrobbled):
     else:
         played_tracks[key] = 1
 
-    if not scrobbled:
+    if scrobbled:
+        played_tracks.popitem(last=False)
+    else:
         if key in played_tracks:
             played_tracks.move_to_end(key, last=False)
         else:
@@ -172,82 +175,113 @@ def users_track_info(artist, track):
 def play_track(track):
     track_url = get_track_url(track)
     while True:
-        if isinstance(track.get('artist'), dict):
-            artist_name = track['artist'].get('name', '')
-        else:
-            artist_name = track.get('artist', '')
-        print("Artist: ", artist_name)
-        print("Track: ", track['name'])
-        player = mpv.MPV(ytdl=True, video=False, terminal=True, input_default_bindings=True, input_terminal=True)
-
-        @player.on_key_press('q')
-        def my_q_binding():
-            nonlocal track_finished
-            track_finished = True
-            print("\nTrack aborted. Next...")
-
-        @player.on_key_press('Shift+q')
-        def my_shift_q_binding():
-            player.command('stop')
-            player.command('quit')
-            print("\nExiting...")
-            time.sleep(0.1)
-            os._exit(0)
-
-        @player.on_key_press('l')
-        def my_l_binding():
-            response = input("\nAdd track to loved tracks? (y/n): ")
-            if response.lower() == "y":
-                add_to_loved_tracks(artist_name, track['name'])
-                print("\nTrack added to loved tracks.")
+        try:
+            if isinstance(track.get('artist'), dict):
+                artist_name = track['artist'].get('name', '')
             else:
-                print("\nCanceled.")
+                artist_name = track.get('artist', '')
+            print("Artist: ", artist_name)
+            print("Track: ", track['name'])
+            player = mpv.MPV(ytdl=True, video=False, terminal=True, input_default_bindings=True, input_terminal=True)
 
-        player.play(track_url)
-        playing = True
-        scrobbled = False
-        track_finished = False
-        users_track_info(artist_name, track['name'])
+            @player.on_key_press('q')
+            def my_q_binding():
+                nonlocal track_finished
+                track_finished = True
+                print("\nTrack aborted. Next...")
 
-        add_to_played_tracks(artist_name, track['name'], scrobbled)
-        print(played_tracks)
-        if not scrobbled:
+            @player.on_key_press('Shift+q')
+            def my_shift_q_binding():
+                player.command('stop')
+                player.command('quit')
+                print("\nExiting...")
+                time.sleep(0.1)
+                os._exit(0)
+
+            @player.on_key_press('l')
+            def my_l_binding():
+                response = input("\nAdd track to loved tracks? (y/n): ")
+                if response.lower() == "y":
+                    add_to_loved_tracks(artist_name, track['name'])
+                    print("\nTrack added to loved tracks.")
+                else:
+                    print("\nCanceled.")
+
+            @player.on_key_press('n')
+            def my_n_binding():
+                nonlocal track_finished, artist_aborted
+                key = artist_name
+                if key in played_tracks:
+                    aborted_artists[key] += 1
+                else:
+                    aborted_artists[key] = 1
+                track_finished = True
+                artist_aborted = True
+                print("\nTrack aborted. Next...")
+
+            player.play(track_url)
+            playing = True
+            scrobbled = False
+            track_finished = False
+            artist_aborted = False
+            users_track_info(artist_name, track['name'])
+
+            add_to_played_tracks(artist_name, track['name'], scrobbled)
             previous_track = get_previous_track()
             similar_track = search_similar_track(previous_track)
-        else:
-            similar_track = search_similar_track(track)
-        if similar_track:
             track_url = get_track_url(similar_track)
 
-        while playing:
-            update_now_playing(artist_name, track['name'])
+            while playing:
+                update_now_playing(artist_name, track['name'])
+                if track_finished:
+                    break
+                if player.duration and player.duration != 'None':
+                    if player.time_pos >= float(player.duration) * 0.5 or player.time_pos >= 180:
+                        if not scrobbled and player.time_pos >= 30:
+                            print("\nScrobbling... ")
+                            scrobble_track(artist_name, track['name'])
+                            print("OK")
+                            if track != previous_track:
+                                add_to_played_tracks(artist_name, track['name'], scrobbled)
+                                similar_track = search_similar_track(track)
+                                track_url = get_track_url(similar_track)
+                            scrobbled = True
+
+                    if player.time_pos >= float(player.duration) - 2:
+                        if not track_finished:
+                            track_finished = True
+                
+                if not player.metadata and player.eof_reached:
+                    print("Not metadata")
+                    player.terminate()
+                    break
+
+                time.sleep(1)
+
             if track_finished:
-                break
-            if player.duration and player.duration != 'None':
-                if player.time_pos >= float(player.duration) * 0.5 or player.time_pos >= 180:
-                    if not scrobbled:
-                        print("\nScrobbling... ")
-                        scrobble_track(artist_name, track['name'])
-                        print("OK")
-                        scrobbled = True
-
-                if player.time_pos >= float(player.duration) - 3:
-                    if not track_finished:
-                        track_finished = True
-            
-            if not player.metadata and player.eof_reached:
-                print("Not metadata")
-                player.terminate()
+                if not artist_aborted:
+                    print("\nArtist not aborted.")
+                    track = similar_track
+                else:
+                    print("\nArtist aborted. Next...")
+                    print("\nAborted artists: ", aborted_artists)
+                    if isinstance(previous_track, str):
+                        previous_track = json.loads(previous_track)
+                    artist_name = previous_track['artist']
+                    track = get_similar_artist_track(artist_name)
+                    track_url = get_track_url(track)
+            else:
                 break
 
-            time.sleep(1)
+            player.terminate()
 
-        if track_finished:
-            track = similar_track
-        else:
-            break
-
-        player.terminate()
+        except pylast.NetworkError as e:
+            print(f"Network error occured {e}")
+            print("Reconnecting...")
+            time.sleep(5)
+            continue
+        # else:
+        #     break
 
 def is_video_available(url):
     try:
@@ -270,19 +304,19 @@ def get_track_url(track):
     search_query = '+'.join(search_query.split())
     for mirror_url in INVIDIOUS_MIRRORS_URLS:
         search_url = f'{mirror_url}/search?q={search_query}'
-        print("\nSearching url... ")
+        # print("\nSearching url... ")
         response = requests.get(search_url)
-        print("OK")
+        # print("OK")
 
         soup = BeautifulSoup(response.text, 'html.parser')
         video_link = soup.find('a', href=lambda href: href.startswith('/watch?v='))
         while video_link:
             video_url = f'https://www.youtube.com{video_link["href"]}'
-            print("\nChecking url... ")
+            # print("\nChecking url... ")
             if is_video_available(video_url):
-                print("OK")
+                # print("OK")
                 return video_url
-            print("Failed. Trying now... ")
+            # print("Failed. Trying now... ")
             video_link = video_link.find_next('a', href=lambda href: href.startswith('/watch?v='))
     return None
 
@@ -422,64 +456,37 @@ def search_similar_track(track):
     if isinstance(track, str):
         track = json.loads(track)
     if isinstance(track.get('artist'), dict):
-        params = {
-            "api_key": api_key,
-            "artist": track['artist']['name'],
-            "track": track['name'],
-            "limit": 12,
-            "format": "json"
-            }
+        artist_name = track['artist']['name']
     else:
-        params = {
-            "api_key": api_key,
-            "artist": track['artist'],
-            "track": track['name'],
-            "limit": 12,
-            "format": "json"
-            }
-    print("\nSearching next track... ")
+        artist_name = track['artist']
+    params = {
+        "api_key": api_key,
+        "artist": artist_name,
+        "track": track['name'],
+        "limit": 12,
+        "format": "json"
+        }
+    # print("\nSearching next track... ")
     response = requests.get(url, params=params).json()
     similar_tracks = response['similartracks']['track']
 
     if not similar_tracks:
-        print("Fail.\nSearching similar artist... ")
-        artist_params = {
-                "api_key": api_key,
-                "artist": params['artist'],
-                "limit": 12,
-                "format": "json"
-                }
-        similar_artist_response = requests.get("http://ws.audioscrobbler.com/2.0/?method=artist.getsimilar", params=artist_params).json()
-        similar_artists = similar_artist_response['similarartists']['artist']
-
-        for artist in similar_artists:
-            top_tracks_params = {
-                "api_key": api_key,
-                "artist": artist['name'],
-                "limit": 6,
-                "format": "json"
-                }
-            top_tracks_response = requests.get("http://ws.audioscrobbler.com/2.0/?method=artist.gettoptracks", params=top_tracks_params).json()
-            top_tracks = top_tracks_response['toptracks']['track']
-
-            for top_track in top_tracks:
-                key = f"{top_track['artist']['name']} - {top_track['name']}"
-                if key not in played_tracks:
-                    print("OK")
-                    return top_track
-
-        if not similar_artists:
+        # print("Fail.\nSearching similar artist... ")
+        similar_artist_track = get_similar_artist_track(artist_name)
+        if not similar_artist_track:
             random_track = get_random_loved_track()
             return random_track
+        return similar_artist_track
+
 
     for similar_track in similar_tracks:
         key = f"{similar_track['artist']['name']} - {similar_track['name']}"
         if key not in played_tracks:
-            print("OK")
+            # print("OK")
             return similar_track
 
 def get_random_loved_track():
-    print("Searching random loved track... ")
+    # print("Searching random loved track... ")
     url = "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks"
     user = username
     params = {
@@ -494,8 +501,36 @@ def get_random_loved_track():
     response = requests.get(url, params=params).json()
     track_list = response['lovedtracks']['track']
     random_track = random.choice(track_list)
-    print("OK")
+    # print("OK")
     return random_track
+
+def get_similar_artist_track(artist):
+    artist_params = {
+            "api_key": api_key,
+            "artist": artist,
+            "limit": 12,
+            "format": "json"
+            }
+    similar_artist_response = requests.get("http://ws.audioscrobbler.com/2.0/?method=artist.getsimilar", params=artist_params).json()
+    similar_artists = similar_artist_response['similarartists']['artist']
+
+    for artist in similar_artists:
+        key = f"{artist['name']}"
+        if key not in aborted_artists:
+            top_tracks_params = {
+                "api_key": api_key,
+                "artist": artist['name'],
+                "limit": 6,
+                "format": "json"
+                }
+            top_tracks_response = requests.get("http://ws.audioscrobbler.com/2.0/?method=artist.gettoptracks", params=top_tracks_params).json()
+            top_tracks = top_tracks_response['toptracks']['track']
+
+            for top_track in top_tracks:
+                key = f"{top_track['artist']['name']} - {top_track['name']}"
+                if key not in played_tracks:
+                    print("OK")
+                    return top_track
 
 def get_request_token(api_key, api_secret):
     url = "http://ws.audioscrobbler.com/2.0/?method=auth.getToken"
