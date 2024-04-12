@@ -53,17 +53,42 @@ def get_network():
     return network
 
 def search_track(query):
-    url = "http://ws.audioscrobbler.com/2.0/?method=track.search"
-    params = {
-            "api_key": api_key,
-            "track": query,
-            "format": "json"
-            }
-    print("\nSearching track... ")
-    response = requests.get(url, params=params).json()
-    track = response['results']['trackmatches']['track'][0]
-    print("OK")
-    return track
+    total_tracks = []
+    current_page = 1
+    current_index = 0
+    while True:
+        url = "http://ws.audioscrobbler.com/2.0/?method=track.search"
+        params = {
+                "api_key": api_key,
+                "track": query,
+                "limit": 5,
+                "page": current_page,
+                "format": "json"
+                }
+        print("\nSearching track... ")
+        response = requests.get(url, params=params).json()
+        tracks = response['results']['trackmatches']['track']
+        if not tracks:
+            print("No more tracks found.")
+            break
+        total_tracks += tracks
+        for i, track in enumerate(tracks, start=1):
+            print(f"{i + current_index}. {track['name']} by {track['artist']}")
+
+        choice = input("Enter the number of the track you want to play or 'n' for the next page... ")
+        if choice.lower() == 'n':
+            current_page += 1
+            current_index += 5
+            continue
+
+        try:
+            choice_index = int(choice) - 1
+            selected_track = total_tracks[choice_index]
+            return selected_track
+        except (ValueError, IndexError):
+            print("Invalid input. Please try again")
+
+    return None
 
 def search_album(query):
     url = "http://ws.audioscrobbler.com/2.0/?method=album.search"
@@ -106,7 +131,7 @@ def search_tag(query):
 
 def add_to_played_tracks(artist, track, scrobbled):
     key = f"{artist} - {track}"
-    print("before: ", played_tracks)
+    # print("before: ", played_tracks)
     if len(played_tracks) < 1:
         played_tracks[key] = 1
         return
@@ -117,7 +142,7 @@ def add_to_played_tracks(artist, track, scrobbled):
         played_tracks[key] = 1
     if not scrobbled:
         played_tracks.move_to_end(key, last=False)
-    print("after: ", played_tracks)
+    # print("after: ", played_tracks)
 
 def get_previous_track():
     print(played_tracks)
