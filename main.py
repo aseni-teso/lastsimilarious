@@ -1,4 +1,6 @@
 import os
+import sys
+import signal
 import argparse
 import requests
 import subprocess
@@ -38,6 +40,12 @@ INVIDIOUS_MIRRORS_URLS = [
         'https://yewtu.be',
         'https://inv.us.projectsegfau.lt'
         ]
+
+def signal_handler(sig, frame):
+    print("\nExiting...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
 
 def get_network():
     session_key = get_or_generate_session_key()
@@ -182,69 +190,68 @@ def get_track_album(artist, track):
             "format": "json"
             }
     response = requests.get(url, params=params).json()
-    album = response['track']['album']['title']
+    if response['track'].get('album'):
+        album = response['track']['album']['title']
+    else:
+        album = None
     return album
 
 def play_track(track):
     track_url = get_track_url(track)
+    reconnecting = False
     while True:
         try:
-            if isinstance(track.get('artist'), dict):
-                artist_name = track['artist'].get('name', '')
-            else:
-                artist_name = track.get('artist', '')
-            print("Artist: ", artist_name)
-            print("Track: ", track['name'])
-            album = get_track_album(artist_name, track['name'])
-            print("Album: ", album)
-            player = mpv.MPV(ytdl=True, video=False, terminal=True, input_default_bindings=True, input_terminal=True)
-
-            @player.on_key_press('q')
-            def my_q_binding():
-                nonlocal track_finished
-                track_finished = True
-                print("\nTrack aborted. Next...")
-
-            @player.on_key_press('Shift+q')
-            def my_shift_q_binding():
-                player.command('stop')
-                player.command('quit')
-                print("\nExiting...")
-                time.sleep(0.1)
-                os._exit(0)
-
-            @player.on_key_press('l')
-            def my_l_binding():
-                response = input("\nAdd track to loved tracks? (y/n): ")
-                if response.lower() == "y":
-                    add_to_loved_tracks(artist_name, track['name'])
-                    print("\nTrack added to loved tracks.")
+            if not reconnecting:
+                if isinstance(track.get('artist'), dict):
+                    artist_name = track['artist'].get('name', '')
                 else:
-                    print("\nCanceled.")
+                    artist_name = track.get('artist', '')
+                print("Artist: ", artist_name)
+                print("Track: ", track['name'])
+                album = get_track_album(artist_name, track['name'])
+                print("Album: ", album)
+                player = mpv.MPV(ytdl=True, video=False, terminal=True, input_default_bindings=True, input_terminal=True)
 
-            @player.on_key_press('n')
-            def my_n_binding():
-                nonlocal track_finished, artist_aborted
-                key = artist_name
-                if key in played_tracks:
-                    aborted_artists[key] += 1
-                else:
-                    aborted_artists[key] = 1
-                track_finished = True
-                artist_aborted = True
-                print("\nTrack aborted. Next...")
+                @player.on_key_press('q')
+                def my_q_binding():
+                    nonlocal track_finished
+                    track_finished = True
+                    print("\nTrack aborted. Next...")
 
-            player.play(track_url)
-            playing = True
-            scrobbled = False
-            track_finished = False
-            artist_aborted = False
-            users_track_info(artist_name, track['name'])
+                @player.on_key_press('l')
+                def my_l_binding():
+                    response = input("\nAdd track to loved tracks? (y/n): ")
+                    if response.lower() == "y":
+                        add_to_loved_tracks(artist_name, track['name'])
+                        print("\nTrack added to loved tracks.")
+                    else:
+                        print("\nCanceled.")
 
-            add_to_played_tracks(artist_name, track['name'], scrobbled)
-            previous_track = get_previous_track()
-            similar_track = search_similar_track(previous_track)
-            track_url = get_track_url(similar_track)
+                @player.on_key_press('n')
+                def my_n_binding():
+                    nonlocal track_finished, artist_aborted
+                    key = artist_name
+                    if key in played_tracks:
+                        aborted_artists[key] += 1
+                    else:
+                        aborted_artists[key] = 1
+                    track_finished = True
+                    artist_aborted = True
+                    print("\nTrack aborted. Next...")
+
+                player.play(track_url)
+                playing = True
+                scrobbled = False
+                track_finished = False
+                artist_aborted = False
+                users_track_info(artist_name, track['name'])
+
+                add_to_played_tracks(artist_name, track['name'], scrobbled)
+                previous_track = get_previous_track()
+                similar_track = search_similar_track(previous_track)
+                track_url = get_track_url(similar_track)
+
+            reconnecting = False
 
             while playing:
                 update_now_playing(artist_name, track['name'], album)
@@ -291,11 +298,13 @@ def play_track(track):
 
         except pylast.NetworkError as e:
             print(f"Network error occured {e}")
-            print("Reconnecting...")
-            time.sleep(5)
-            continue
-        # else:
-        #     break
+            if not reconnecting:
+                reconnecting = True
+                print("Reconnecting...")
+                time.sleep(5)
+            else:
+                print("Already reconnecting, skipping...")
+                time.sleep(5)
 
 def is_video_available(url):
     try:
