@@ -235,6 +235,7 @@ def play_track(track):
                 print("Track: ", track['name'])
                 album = get_track_album(artist_name, track['name'])
                 print("Album: ", album)
+                # print(track)
                 player = mpv.MPV(ytdl=True, video=False, terminal=True, input_default_bindings=True, input_terminal=True)
 
                 @player.on_key_press('q')
@@ -293,7 +294,7 @@ def play_track(track):
                             similar_track = search_similar_track(track)
                             track_url = get_track_url(similar_track)
 
-                    if player.time_pos >= float(player.duration) - 2:
+                    if player.time_pos >= float(player.duration) - 3:
                         if not track_finished:
                             track_finished = True
                 
@@ -511,23 +512,27 @@ def search_similar_track(track):
         "api_key": api_key,
         "artist": artist_name,
         "track": track['name'],
-        "limit": 12,
+        "limit": 18,
         "format": "json"
         }
-    # print("\nSearching next track... ")
+    print("\nSearching next track... ")
     response = requests.get(url, params=params).json()
     similar_tracks = response['similartracks']['track']
 
     if not similar_tracks:
         # print("Fail.\nSearching similar artist... ")
-        similar_artist_track = get_similar_artist_track(artist_name)
-        if similar_artist_track:
-            print(f"\nNext track is similar on artist: {similar_artist_track['artist']['name']} - {similar_artist_track['name']}")
-        else:
-            random_track = get_random_loved_track()
-            print(f"\nNext track is random loved track: {random_track['artist']['name']} - {random_track['name']}")
-            return random_track
-        return similar_artist_track
+        similar_track = extract_similar_track_from_html(artist_name, track['name'])
+        if not similar_track:
+            similar_artist_track = get_similar_artist_track(artist_name)
+            if similar_artist_track:
+                print(f"\nNext track is similar on artist: {similar_artist_track['artist']['name']} - {similar_artist_track['name']}")
+            else:
+                random_track = get_random_loved_track()
+                print(f"\nNext track is random loved track: {random_track['artist']['name']} - {random_track['name']}")
+                return random_track
+            return similar_artist_track
+        print(f"\nNext track is similar on track: {similar_track['artist']} - {similar_track['name']}")
+        return similar_track
 
     for similar_track in similar_tracks:
         key = f"{similar_track['artist']['name']} - {similar_track['name']}"
@@ -558,6 +563,29 @@ def get_random_loved_track():
     # print("OK")
     return random_track
 
+def extract_similar_track_from_html(artist, track):
+    track_url = f"https://www.last.fm/music/{artist}/_/{track}"
+    response = requests.get(track_url)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        similar_track_section = soup.find('h3', string='Similar Tracks')
+        if similar_track_section:
+            similar_track_section = similar_track_section.find_next('ol')
+            similar_tracks_items = similar_track_section.find_all('li')
+            for item in similar_tracks_items:
+                track_title = item.find('h3').find('a').text.strip()
+                track_artist = item.find('p').find('span').find('a').text.strip()
+                key = f"{track_artist} - {track_title}"
+                if key not in played_tracks:
+                    data = {
+                            'name': track_title,
+                            'artist': track_artist
+                            }
+                    similar_track = json.dumps(data)
+                    if isinstance(similar_track, str):
+                        similar_track = json.loads(similar_track)
+                    return similar_track
+
 def get_similar_artist_track(artist):
     artist_params = {
             "api_key": api_key,
@@ -568,12 +596,21 @@ def get_similar_artist_track(artist):
     similar_artist_response = requests.get("http://ws.audioscrobbler.com/2.0/?method=artist.getsimilar", params=artist_params).json()
     similar_artists = similar_artist_response['similarartists']['artist']
 
+    if not similar_artists:
+        similar_artists = extract_similar_artist_from_html(artist)
+
     for artist in similar_artists:
-        key = f"{artist['name']}"
+        # print(artist)
+        if 'artist' in artist:
+            artist_name = artist['artist']
+        else:
+            artist_name = artist['name']
+        key = f"{artist_name}"
+        # print(artist_name)
         if key not in aborted_artists:
             top_tracks_params = {
                 "api_key": api_key,
-                "artist": artist['name'],
+                "artist": artist_name,
                 "limit": 6,
                 "format": "json"
                 }
@@ -585,6 +622,25 @@ def get_similar_artist_track(artist):
                 if key not in played_tracks:
                     # print("OK")
                     return top_track
+
+def extract_similar_artist_from_html(artist):
+    similar_artists = []
+    artist_url = f"https://www.last.fm/music/{artist}/+similar"
+    response = requests.get(artist_url)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        similar_artists_section = soup.find('h2', string='Similar Artists')
+        if similar_artists_section:
+            similar_artists_section = similar_artists_section.find_next('ol')
+            similar_artists_items = similar_artists_section.find_all('li')
+            for item in similar_artists_items:
+                if item.find('h3'):
+                    artist_title = item.find('h3').find('a').text.strip()
+                    similar_artists.append({'artist': artist_title})
+                    similar_artists = json.dumps(similar_artists)
+                    if isinstance(similar_artists, str):
+                        similar_artists = json.loads(similar_artists)
+            return similar_artists
 
 def get_request_token(api_key, api_secret):
     url = "http://ws.audioscrobbler.com/2.0/?method=auth.getToken"
