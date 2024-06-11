@@ -15,8 +15,33 @@ import random
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from collections import OrderedDict
+from getpass import getpass
+
+if not os.path.exists('.env'):
+    with open('.env', 'w') as f:
+        f.write('')
 
 load_dotenv()
+if not os.getenv('LASTFM_API_KEY'):
+    api_key = input("Enter your API key: ")
+    with open('.env', 'a') as f:
+        f.write(f'LASTFM_API_KEY={api_key}\n')
+
+if not os.getenv('LASTFM_API_SECRET'):
+    api_secret = input("Enter your API secret phrase: ")
+    with open('.env', 'a') as f:
+        f.write(f'LASTFM_API_SECRET={api_secret}\n')
+
+if not os.getenv('username'):
+    username = input("Enter your Last.fm Username: ")
+    with open('.env', 'a') as f:
+        f.write(f'username={username}\n')
+
+if not os.getenv('password'):
+    password = getpass("Enter your password: ")
+    with open('.env', 'a') as f:
+        f.write(f'password={password}\n')
+
 api_key = os.getenv("LASTFM_API_KEY")
 api_secret = os.getenv("LASTFM_API_SECRET")
 username = os.getenv("username")
@@ -38,6 +63,7 @@ new_track = False
 tag_played = False
 
 INVIDIOUS_MIRRORS_URLS = [
+        'https://invidious.materialio.us',
         'https://invidious.privacyredirect.com',
         'https://inv.oikei.net',
         'https://inv.us.projectsegfau.lt',
@@ -151,7 +177,6 @@ def add_to_played_tracks(artist, track, scrobbled):
     key = f"{artist} - {track}"
     if artist and track:
         key = key.lower()
-    # print("before: ", played_tracks)
     if len(played_tracks) < 1:
         played_tracks[key] = 1
         return
@@ -162,10 +187,8 @@ def add_to_played_tracks(artist, track, scrobbled):
         played_tracks[key] = 1
     if not scrobbled:
         played_tracks.move_to_end(key, last=False)
-    # print("after: ", played_tracks)
 
 def get_previous_track():
-    #print(played_tracks)
     if len(played_tracks):
         keys = list(played_tracks.keys())
         previous_key = keys[-1]
@@ -261,7 +284,6 @@ def play_track(track):
                 else:
                     album = track['album']
                 print("Album: ", album)
-                # print(track)
                 player = mpv.MPV(ytdl=True, video=False, terminal=True, input_default_bindings=True, input_terminal=True)
 
                 @player.on_key_press('q')
@@ -346,11 +368,9 @@ def play_track(track):
 
             if track_finished:
                 if not artist_aborted:
-                    # print("\nArtist not aborted.")
                     track = similar_track
                 else:
                     print("\nArtist aborted. Next...")
-                    #print("\nAborted artists: ", aborted_artists)
                     if isinstance(previous_track, str):
                         previous_track = json.loads(previous_track)
                     artist_name = previous_track['artist']
@@ -371,6 +391,12 @@ def play_track(track):
             else:
                 print("Already reconnecting, skipping...")
                 time.sleep(5)
+        except Exception as e:
+            if "403" in str(e):
+                print("Restarting playback...")
+                player.play(track_url)
+            else:
+                print(f"Error occured: {e}")
 
 def is_video_available(url):
     try:
@@ -391,20 +417,23 @@ def get_track_url(track):
 
     search_query = f'{track_name} {artist_name}'
     search_query = '+'.join(search_query.split())
-    for mirror_url in INVIDIOUS_MIRRORS_URLS:
+    for mirror_idx, mirror_url in enumerate(INVIDIOUS_MIRRORS_URLS):
         search_url = f'{mirror_url}/search?q={search_query}'
-        response = requests.get(search_url)
+        try:
+            response = requests.get(search_url, timeout=20)
+            response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-        video_link = soup.find('a', href=lambda href: href.startswith('/watch?v='))
-        while video_link:
-            video_url = f'https://www.youtube.com{video_link["href"]}'
-            # print("\nChecking url... ")
-            if is_video_available(video_url):
-                # print("OK")
-                return video_url
-            # print("Failed. Trying now... ")
-            video_link = video_link.find_next('a', href=lambda href: href.startswith('/watch?v='))
+            soup = BeautifulSoup(response.text, 'html.parser')
+            video_link = soup.find('a', href=lambda href: href.startswith('/watch?v='))
+            while video_link:
+                video_url = f'https://www.youtube.com{video_link["href"]}'
+                if is_video_available(video_url):
+                    return video_url
+                video_link = video_link.find_next('a', href=lambda href: href.startswith('/watch?v='))
+        except (requests.exceptions.RequestException, requests.exceptions.Timeout):
+            invalid_mirror = INVIDIOUS_MIRRORS_URLS.pop(mirror_idx)
+            INVIDIOUS_MIRRORS_URLS.append(invalid_mirror)
+            print(f'Invalid mirror: {invalid_mirror}')
     return None
 
 def play_album(album):
@@ -584,7 +613,6 @@ def search_similar_track(track):
         return similar_artist_track 
 
     if not similar_tracks:
-        # print("Fail.\nSearching similar artist... ")
         similar_track = extract_similar_track_from_html(artist_name, track['name'])
         if not similar_track:
             similar_artist_track = get_similar_artist_track(artist_name)
@@ -601,8 +629,6 @@ def search_similar_track(track):
     for similar_track in similar_tracks:
         key = f"{similar_track['artist']['name']} - {similar_track['name']}"
         key_lower = key.lower()
-        #print("key: ", key_lower)
-        #print("played_tracks: ", played_tracks)
         if key_lower not in played_tracks:
             print(f"\nNext track is similar on track: {similar_track['artist']['name']} - {similar_track['name']}")
             return similar_track
@@ -686,9 +712,7 @@ def get_similar_artist_track(artist):
                     for top_track in top_tracks:
                         key = f"{top_track['artist']['name']} - {top_track['name']}"
                         key_lower = key.lower()
-                        #print("key: ", key_lower)
                         if key_lower not in played_tracks:
-                            # print("OK")
                             return top_track
 
 def extract_similar_artist_from_html(artist):
@@ -799,4 +823,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
