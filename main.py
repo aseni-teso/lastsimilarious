@@ -17,29 +17,31 @@ from dotenv import load_dotenv
 from collections import OrderedDict
 from getpass import getpass
 
-if not os.path.exists('.env'):
-    with open('.env', 'w') as f:
+env_path = '/usr/share/lastsimilarious/env_path'
+
+if not os.path.exists(env_path):
+    with open(env_path, 'w') as f:
         f.write('')
 
 load_dotenv()
 if not os.getenv('LASTFM_API_KEY'):
     api_key = input("Enter your API key: ")
-    with open('.env', 'a') as f:
+    with open('env_path', 'a') as f:
         f.write(f'LASTFM_API_KEY={api_key}\n')
 
 if not os.getenv('LASTFM_API_SECRET'):
     api_secret = input("Enter your API secret phrase: ")
-    with open('.env', 'a') as f:
+    with open('env_path', 'a') as f:
         f.write(f'LASTFM_API_SECRET={api_secret}\n')
 
 if not os.getenv('username'):
     username = input("Enter your Last.fm Username: ")
-    with open('.env', 'a') as f:
+    with open('env_path', 'a') as f:
         f.write(f'username={username}\n')
 
 if not os.getenv('password'):
     password = getpass("Enter your password: ")
-    with open('.env', 'a') as f:
+    with open('env_path', 'a') as f:
         f.write(f'password={password}\n')
 
 api_key = os.getenv("LASTFM_API_KEY")
