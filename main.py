@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from collections import OrderedDict
 from getpass import getpass
 
-env_path = '/usr/share/lastsimilarious/env_path'
+env_path = '/usr/share/lastsimilarious/.env'
 
 if not os.path.exists(env_path):
     with open(env_path, 'w') as f:
@@ -65,6 +65,7 @@ new_track = False
 tag_played = False
 
 INVIDIOUS_MIRRORS_URLS = [
+        'https://invidious.0011.lt',
         'https://invidious.materialio.us',
         'https://invidious.privacyredirect.com',
         'https://inv.oikei.net',
@@ -763,7 +764,8 @@ def get_session_key(api_key, api_secret, token):
 
 def get_or_generate_session_key():
     config = configparser.ConfigParser()
-    config.read('config.ini')
+    config_path = '/usr/share/lastsimilarious/config.ini'
+    config.read(config_path)
     if config.has_option('AUTH', 'SESSION_KEY'):
         session_key = config.get('AUTH', 'SESSION_KEY')
         return session_key
@@ -778,11 +780,12 @@ def get_or_generate_session_key():
 
 def save_session_key(session_key):
     config = configparser.ConfigParser()
-    config.read('config.ini')
+    config_path = '/usr/share/lastsimilarious/config.ini'
+    config.read(config_path)
     if not config.has_section('AUTH'):
         config.add_section('AUTH')
     config.set('AUTH', 'SESSION_KEY', session_key)
-    with open('config.ini', 'w') as configfile:
+    with open(config_path, 'w') as configfile:
         config.write(configfile)
 
 def main():
