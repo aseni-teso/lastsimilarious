@@ -14,10 +14,27 @@ The LastSimilarious player utilizes the Last.fm API to search for music based on
 - Scrobble the played tracks to your Last.fm account
 - Easy-to-use command-line interface
 
-## Requirements
+## Installation
 
-- Python 3.x
-- Required Python packages: os, sys, signal, argparse, requests, subprocess, configparser, time, hashlib, pylast, mpv, json, random, BeautifulSoup, dotenv
+- For Arch-like distributions:
+    Install the `lastsimilarious` package from the AUR. For example, `yay -S lastsimilarious`
+- For Debian-like distributions:
+    First, install the following dependencies via apt:
+    ```
+    sudo apt update
+    sudo apt install python3-requests python3-pylast python3-bs4 python3-dotenv python3-mpv mpv yt-dlp
+    ```
+    Then clone the repository and navigate to the `lastsimilarious` directory, and run: `python3 main.py`
+- For other distributions:
+    It is recommended to manually install the following dependencies:
+    - python3-requests
+    - python3-pylast
+    - python3-bs4
+    - python3-dotenv
+    - python3-mpv
+    - mpv
+    - yt-dlp
+
 
 ## How to Use
 
