@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from collections import OrderedDict
 from getpass import getpass
 
-env_path = '/usr/share/lastsimilarious/.env'
+env_path = './.env'
 
 if not os.path.exists(env_path):
     with open(env_path, 'w') as f:
@@ -755,7 +755,7 @@ def get_session_key(api_key, api_secret, token):
 
 def get_or_generate_session_key():
     config = configparser.ConfigParser()
-    config_path = '/usr/share/lastsimilarious/config.ini'
+    config_path = './config.ini'
     config.read(config_path)
     if config.has_option('AUTH', 'SESSION_KEY'):
         session_key = config.get('AUTH', 'SESSION_KEY')
@@ -771,7 +771,7 @@ def get_or_generate_session_key():
 
 def save_session_key(session_key):
     config = configparser.ConfigParser()
-    config_path = '/usr/share/lastsimilarious/config.ini'
+    config_path = './config.ini'
     config.read(config_path)
     if not config.has_section('AUTH'):
         config.add_section('AUTH')
