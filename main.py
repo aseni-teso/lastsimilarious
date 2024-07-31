@@ -51,6 +51,7 @@ args = parser.parse_args()
 
 played_tracks = OrderedDict()
 aborted_artists = OrderedDict()
+recent_tracks = OrderedDict()
 
 new_track = False
 tag_played = False
@@ -573,6 +574,30 @@ def get_popular_tracks_by_user(user):
     track_list = response['toptracks']['track']
     return track_list
 
+def get_recent_tracks_by_user(user):
+    url = "http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks"
+    params = {
+            "api_key": api_key,
+            "user": user,
+            "limit": 30,
+            "extended": 1,
+            "format": "json"
+            }
+    response = requests.get(url, params=params).json()
+    track_list = response['recenttracks']['track']
+    return track_list
+
+def get_recent_tracks_dict(user):
+    track_list = get_recent_tracks_by_user(user)
+    ordered_tracks = OrderedDict()
+    for track in track_list:
+        loved = track['loved']
+        if loved == '0':
+            artist_name = track['artist']['name'].lower()
+            track_name = track['name'].lower()
+            ordered_tracks[f"{artist_name} - {track_name}"] = None
+    return ordered_tracks
+
 def get_random_track_by_tag(tag):
     global tag_played   
     tag_played = True
@@ -620,10 +645,11 @@ def search_similar_track(track):
         print(f"\nNext track is similar on track: {similar_track['artist']} - {similar_track['name']}")
         return similar_track
 
+    recent_tracks = get_recent_tracks_dict(username)
     for similar_track in similar_tracks:
         key = f"{similar_track['artist']['name']} - {similar_track['name']}"
         key_lower = key.lower()
-        if key_lower not in played_tracks:
+        if key_lower not in played_tracks and key_lower not in recent_tracks:
             print(f"\nNext track is similar on track: {similar_track['artist']['name']} - {similar_track['name']}")
             return similar_track
 
@@ -657,12 +683,13 @@ def extract_similar_track_from_html(artist, track):
         if similar_track_section:
             similar_track_section = similar_track_section.find_next('ol')
             similar_tracks_items = similar_track_section.find_all('li')
+            recent_tracks = get_recent_tracks_dict(username)
             for item in similar_tracks_items:
                 track_title = item.find('h3').find('a').text.strip()
                 track_artist = item.find('p').find('span').find('a').text.strip()
                 key = f"{track_artist} - {track_title}"
                 key_lower = key.lower()
-                if key_lower not in played_tracks:
+                if key_lower not in played_tracks and key_lower not in recent_tracks:
                     data = {
                             'name': track_title,
                             'artist': track_artist
@@ -703,10 +730,11 @@ def get_similar_artist_track(artist):
                     top_tracks_response = requests.get("http://ws.audioscrobbler.com/2.0/?method=artist.gettoptracks", params=top_tracks_params).json()
                     top_tracks = top_tracks_response['toptracks']['track']
 
+                    recent_tracks = get_recent_tracks_dict(username)
                     for top_track in top_tracks:
                         key = f"{top_track['artist']['name']} - {top_track['name']}"
                         key_lower = key.lower()
-                        if key_lower not in played_tracks:
+                        if key_lower not in played_tracks and key_lower not in recent_tracks:
                             return top_track
 
 def extract_similar_artist_from_html(artist):
