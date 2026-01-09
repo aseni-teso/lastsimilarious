@@ -77,6 +77,8 @@ def save_mirrors(mirrors):
         print(f"[debug] save_mirrors error: {e}")
 
 def promote_mirror(mirrors, url):
+    if mirrors and mirrors[0] == url:
+        return mirrors
     if url in mirrors:
         mirrors.remove(url)
     mirrors.insert(0, url)
