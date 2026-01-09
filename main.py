@@ -65,16 +65,16 @@ def load_mirrors():
             mirrors = json.load(f)
             if isinstance(mirrors, list):
                 return mirrors
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[debug] load_mirrors error: {e}")
     return []
 
 def save_mirrors(mirrors):
     try:
         with MIRRORS_PATH.open("w", encoding="utf-8") as f:
             json.dump(mirrors, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[debug] save_mirrors error: {e}")
 
 def promote_mirror(mirrors, url):
     if url in mirrors:
@@ -434,30 +434,60 @@ def get_track_url(track):
     search_query = '+'.join(search_query.split())
 
     mirrors = load_mirrors()
-    any_success = False
+    if not mirrors:
+        print("[debug] mirrors list is empty (mirrors.json missing/invalid).")
+        return None
 
-    for mirror_url in mirrors:
-        search_url = f'{mirror_url}/search?q={search_query}'
+    any_successful_request = False
+    last_exception = None
+
+    for idx, mirror_url in enumerate(mirrors):
+        search_url = f'{mirror_url.rstrip("/")}/search?q={search_query}'
+        print(f"[debug] Trying mirror {idx+1}/{len(mirrors)}: {mirror_url}")
         try:
-            response = requests.get(search_url, timeout=10)
-            response.raise_for_status()
-            any_success = True
+            resp = requests.get(search_url, timeout=10)
+            print(f"[debug] HTTP {mirror_url} -> {resp.status_code}")
+            resp.raise_for_status()
+            any_successful_request = True
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(resp.text, 'html.parser')
             video_link = soup.find('a', href=lambda href: href and href.startswith('/watch?v='))
+            found_any_link = False
             while video_link:
+                found_any_link = True
                 video_url = f'https://www.youtube.com{video_link["href"]}'
+                print(f"[debug] Found candidate video: {video_url}")
                 if is_video_available(video_url):
+                    print(f"[debug] Video available via {mirror_url}, promoting mirror.")
                     promote_mirror(mirrors, mirror_url)
                     return video_url
+                else:
+                    print(f"[debug] Candidate not available: {video_url}")
                 video_link = video_link.find_next('a', href=lambda href: href and href.startswith('/watch?v='))
-            promote_mirror(mirrors, mirror_url)
-        except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-            # print(f'Invalid mirror: {mirror_url}')
+            if not found_any_link:
+                print("[debug] No /watch?v= links found on {mirror_url} search results.")
+            else:
+                print(f"[debug] Page OK but no valid video found; promoting {mirror_url}.")
+                promote_mirror(mirrors, mirror_url)
+        except requests.exceptions.Timeout as e:
+            print(f"[debug] Timeout on {mirror_url}: {e}")
+            last_exception = e
+            continue
+        except requests.exceptions.RequestException as e:
+            print(f"[debug] Request error on {mirror_url}: {e}")
+            last_exception = e
+            continue
+        except Exception as e:
+            print(f"[debug] Unexpected error on {mirror_url}: {e}")
+            last_exception = e
             continue
 
-    if not any_success:
+    if not any_successful_request:
         print("All mirrors are unavailables.")
+    else:
+        print("[debug] Searched all mirrors but found no available video.")
+        if last_exception:
+            print(f"[debug] Last exception: {last_exception}")
     return None
 
 def play_album(album):
