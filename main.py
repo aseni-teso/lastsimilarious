@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from collections import OrderedDict
 from getpass import getpass
+from pathlib import Path
 
 env_path = './.env'
 
@@ -56,16 +57,31 @@ recent_tracks = OrderedDict()
 new_track = False
 tag_played = False
 
-INVIDIOUS_MIRRORS_URLS = [
-        'https://invidious.nerdvpn.de',
-        'https://yewtu.be',
-        'https://inv.nadeko.net',
-        'https://invidious.0011.lt',
-        'https://invidious.materialio.us',
-        'https://invidious.privacyredirect.com',
-        'https://inv.oikei.net',
-        'https://inv.us.projectsegfau.lt'
-        ]
+MIRRORS_PATH = Path(__file__).parent / "mirrors.json"
+
+def load_mirrors():
+    try:
+        with MIRRORS_PATH.open("r", encoding="utf-8") as f:
+            mirrors = json.load(f)
+            if isinstance(mirrors, list):
+                return mirrors
+    except Exception:
+        pass
+    return []
+
+def save_mirrors(mirrors):
+    try:
+        with MIRRORS_PATH.open("w", encoding="utf-8") as f:
+            json.dump(mirrors, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def promote_mirror(mirrors, url):
+    if url in mirrors:
+        mirrors.remove(url)
+    mirrors.insert(0, url)
+    save_mirrors(mirrors)
+    return mirrors
 
 def signal_handler(sig, frame):
     print("\nExiting...")
@@ -417,26 +433,30 @@ def get_track_url(track):
     search_query = f'{track_name} {artist_name}'
     search_query = '+'.join(search_query.split())
 
-    any_available = False
-    for mirror_url in INVIDIOUS_MIRRORS_URLS:
+    mirrors = load_mirrors()
+    any_success = False
+
+    for mirror_url in mirrors:
         search_url = f'{mirror_url}/search?q={search_query}'
         try:
             response = requests.get(search_url, timeout=10)
             response.raise_for_status()
-            any_available = True
+            any_success = True
 
             soup = BeautifulSoup(response.text, 'html.parser')
             video_link = soup.find('a', href=lambda href: href and href.startswith('/watch?v='))
             while video_link:
                 video_url = f'https://www.youtube.com{video_link["href"]}'
                 if is_video_available(video_url):
+                    promote_mirror(mirrors, mirror_url)
                     return video_url
                 video_link = video_link.find_next('a', href=lambda href: href and href.startswith('/watch?v='))
+            promote_mirror(mirrors, mirror_url)
         except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-            print(f'Invalid mirror: {mirror_url}')
+            # print(f'Invalid mirror: {mirror_url}')
             continue
 
-    if not any_available:
+    if not any_success:
         print("All mirrors are unavailables.")
     return None
 
