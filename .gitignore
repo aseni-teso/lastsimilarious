@@ -1,0 +1,5 @@
+.env*
+*.log
+LastSimilarious*
+PKGBUILD
+config.ini*

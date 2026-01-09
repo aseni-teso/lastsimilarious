@@ -57,12 +57,13 @@ new_track = False
 tag_played = False
 
 INVIDIOUS_MIRRORS_URLS = [
+        'https://invidious.nerdvpn.de',
+        'https://yewtu.be',
+        'https://inv.nadeko.net',
         'https://invidious.0011.lt',
         'https://invidious.materialio.us',
         'https://invidious.privacyredirect.com',
         'https://inv.oikei.net',
-        'https://inv.us.projectsegfau.lt',
-        'https://yewtu.be',
         'https://inv.us.projectsegfau.lt'
         ]
 
@@ -263,6 +264,9 @@ def play_track(track):
     global new_track, tag_played
     print("\nSearching url... ")
     track_url = get_track_url(track)
+    if track_url is None:
+        print("Exiting...")
+        sys.exit(1)
     print("OK")
     reconnecting = False
     while True:
@@ -412,23 +416,28 @@ def get_track_url(track):
 
     search_query = f'{track_name} {artist_name}'
     search_query = '+'.join(search_query.split())
-    for mirror_idx, mirror_url in enumerate(INVIDIOUS_MIRRORS_URLS):
+
+    any_available = False
+    for mirror_url in INVIDIOUS_MIRRORS_URLS:
         search_url = f'{mirror_url}/search?q={search_query}'
         try:
-            response = requests.get(search_url, timeout=20)
+            response = requests.get(search_url, timeout=10)
             response.raise_for_status()
+            any_available = True
 
             soup = BeautifulSoup(response.text, 'html.parser')
-            video_link = soup.find('a', href=lambda href: href.startswith('/watch?v='))
+            video_link = soup.find('a', href=lambda href: href and href.startswith('/watch?v='))
             while video_link:
                 video_url = f'https://www.youtube.com{video_link["href"]}'
                 if is_video_available(video_url):
                     return video_url
-                video_link = video_link.find_next('a', href=lambda href: href.startswith('/watch?v='))
-        except (requests.exceptions.RequestException, requests.exceptions.Timeout):
-            invalid_mirror = INVIDIOUS_MIRRORS_URLS.pop(mirror_idx)
-            INVIDIOUS_MIRRORS_URLS.append(invalid_mirror)
-            print(f'Invalid mirror: {invalid_mirror}')
+                video_link = video_link.find_next('a', href=lambda href: href and href.startswith('/watch?v='))
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException):
+            print(f'Invalid mirror: {mirror_url}')
+            continue
+
+    if not any_available:
+        print("All mirrors are unavailables.")
     return None
 
 def play_album(album):
